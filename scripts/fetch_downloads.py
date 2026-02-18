@@ -35,7 +35,7 @@ def load_existing_entries():
 
 
 def fetch_pypi_downloads(package):
-    """Fetch yesterday's download count from pypistats.org."""
+    """Fetch all available daily download counts from pypistats.org."""
     url = f"https://pypistats.org/api/packages/{package}/overall"
     try:
         resp = requests.get(url, timeout=30)
@@ -43,43 +43,38 @@ def fetch_pypi_downloads(package):
         data = resp.json()
     except Exception as e:
         print(f"  [ERROR] PyPI fetch failed for {package}: {e}")
-        return None
+        return []
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    results = []
     for entry in data.get("data", []):
-        if entry.get("date") == yesterday and entry.get("category") == "with_mirrors":
-            return {"date": yesterday, "downloads": entry["downloads"]}
+        if entry.get("category") == "with_mirrors":
+            results.append({"date": entry["date"], "downloads": entry["downloads"]})
 
-    # Fallback: use the most recent date with with_mirrors data
-    with_mirrors = [
-        e for e in data.get("data", []) if e.get("category") == "with_mirrors"
-    ]
-    if with_mirrors:
-        latest = max(with_mirrors, key=lambda e: e["date"])
-        return {"date": latest["date"], "downloads": latest["downloads"]}
-
-    print(f"  [WARN] No download data found for PyPI package: {package}")
-    return None
+    if not results:
+        print(f"  [WARN] No download data found for PyPI package: {package}")
+    return results
 
 
 def fetch_npm_downloads(package):
-    """Fetch yesterday's download count from npm registry."""
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    url = f"https://api.npmjs.org/downloads/point/{yesterday}:{yesterday}/{package}"
+    """Fetch last 30 days of daily download counts from npm registry."""
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=364)
+    url = f"https://api.npmjs.org/downloads/range/{start.isoformat()}:{end.isoformat()}/{package}"
     try:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
         print(f"  [ERROR] npm fetch failed for {package}: {e}")
-        return None
+        return []
 
-    downloads = data.get("downloads")
-    if downloads is not None:
-        return {"date": yesterday, "downloads": downloads}
+    results = []
+    for entry in data.get("downloads", []):
+        results.append({"date": entry["day"], "downloads": entry["downloads"]})
 
-    print(f"  [WARN] No download data found for npm package: {package}")
-    return None
+    if not results:
+        print(f"  [WARN] No download data found for npm package: {package}")
+    return results
 
 
 def append_rows(rows):
@@ -105,31 +100,33 @@ def main():
 
     for pkg in pypi_packages:
         print(f"Fetching PyPI: {pkg}")
-        result = fetch_pypi_downloads(pkg)
-        if result and (result["date"], pkg, "pypi") not in existing:
-            new_rows.append({
-                "date": result["date"],
-                "package": pkg,
-                "source": "pypi",
-                "downloads": result["downloads"],
-            })
-            print(f"  -> {result['downloads']:,} downloads on {result['date']}")
-        elif result:
-            print(f"  -> Already recorded for {result['date']}, skipping")
+        results = fetch_pypi_downloads(pkg)
+        added = 0
+        for result in results:
+            if (result["date"], pkg, "pypi") not in existing:
+                new_rows.append({
+                    "date": result["date"],
+                    "package": pkg,
+                    "source": "pypi",
+                    "downloads": result["downloads"],
+                })
+                added += 1
+        print(f"  -> {len(results)} data points fetched, {added} new")
 
     for pkg in npm_packages:
         print(f"Fetching npm: {pkg}")
-        result = fetch_npm_downloads(pkg)
-        if result and (result["date"], pkg, "npm") not in existing:
-            new_rows.append({
-                "date": result["date"],
-                "package": pkg,
-                "source": "npm",
-                "downloads": result["downloads"],
-            })
-            print(f"  -> {result['downloads']:,} downloads on {result['date']}")
-        elif result:
-            print(f"  -> Already recorded for {result['date']}, skipping")
+        results = fetch_npm_downloads(pkg)
+        added = 0
+        for result in results:
+            if (result["date"], pkg, "npm") not in existing:
+                new_rows.append({
+                    "date": result["date"],
+                    "package": pkg,
+                    "source": "npm",
+                    "downloads": result["downloads"],
+                })
+                added += 1
+        print(f"  -> {len(results)} data points fetched, {added} new")
 
     if new_rows:
         append_rows(new_rows)
