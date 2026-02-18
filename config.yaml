@@ -5,3 +5,9 @@ npm:
   - "@armoriq/sdk"
   - armoriq-openclaw-plugin
   - "@armoriq/armorclaw"
+
+github:
+  repos:
+    - armoriq/armorclaw
+    - armoriq/armoriq-sdk-customer
+    - armoriq/conmap
