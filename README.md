@@ -2,7 +2,7 @@
 
 Automated daily tracking of package and repository traction metrics from PyPI, npm, and GitHub.
 
-**Last updated:** 2026-02-17
+**Last updated:** 2026-02-18
 
 ## Tracked Items
 
