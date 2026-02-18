@@ -8,6 +8,7 @@ Automated daily tracking of package and repository traction metrics from PyPI, n
 
 | Item | Source | Metric | Value |
 |------|--------|--------|-------|
+| @armoriq/armorclaw | npm | Total Downloads | 29 |
 | @armoriq/sdk | npm | Total Downloads | 114 |
 | armoriq-openclaw-plugin | npm | Total Downloads | 186 |
 | armoriq-sdk | PyPI | Total Downloads | 3,436 |
