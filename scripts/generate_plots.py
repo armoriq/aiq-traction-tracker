@@ -126,12 +126,12 @@ def update_readme(series):
     table_rows = []
     for pkg, source in packages:
         points = series[(pkg, source)]
-        latest_date, latest_dl = points[-1] if points else ("—", "—")
-        table_rows.append(f"| {pkg} | {source} | {latest_dl:,} | {latest_date} |")
+        total_dl = sum(dl for _, dl in points)
+        table_rows.append(f"| {pkg} | {source} | {total_dl:,} |")
 
     table = (
-        "| Package | Source | Latest Downloads | Date |\n"
-        "|---------|--------|-----------------|------|\n"
+        "| Package | Source | Total Downloads |\n"
+        "|---------|--------|----------------|\n"
         + "\n".join(table_rows)
     )
 
