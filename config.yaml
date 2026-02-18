@@ -7,5 +7,7 @@ npm:
   - "@armoriq/armorclaw"
 
 github:
-  owners:
-    - armoriq
+  repos:
+    - armoriq/armorclaw
+    - armoriq/armoriq-sdk-customer
+    - armoriq/conmap
