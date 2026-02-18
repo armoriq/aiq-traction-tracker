@@ -2,7 +2,7 @@
 
 Automated daily tracking of package download counts from PyPI and npm.
 
-**Last updated:** 2026-02-17
+**Last updated:** 2026-02-18
 
 ## Tracked Packages
 
@@ -10,7 +10,7 @@ Automated daily tracking of package download counts from PyPI and npm.
 |---------|--------|----------------|
 | @armoriq/sdk | npm | 114 |
 | armoriq-openclaw-plugin | npm | 186 |
-| armoriq-sdk | pypi | 3,434 |
+| armoriq-sdk | pypi | 3,436 |
 
 ## Download Trends
 
