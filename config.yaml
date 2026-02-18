@@ -1,0 +1,7 @@
+pypi:
+  - armoriq-sdk
+
+npm:
+  - "@armoriq/sdk"
+  - armoriq-openclaw-plugin
+  - "@armoriq/armorclaw"

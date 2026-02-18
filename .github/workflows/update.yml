@@ -1,0 +1,38 @@
+name: Update Download Stats
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # Daily at 6 AM UTC
+  workflow_dispatch:       # Manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch download data
+        run: python scripts/fetch_downloads.py
+
+      - name: Generate plots and update README
+        run: python scripts/generate_plots.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ plots/ README.md
+          git diff --staged --quiet || git commit -m "Update download stats for $(date -u +%Y-%m-%d)"
+          git push
