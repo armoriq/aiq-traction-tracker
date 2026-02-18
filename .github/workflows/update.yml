@@ -24,6 +24,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Fetch download data
+        env:
+          GH_TOKEN: ${{ secrets.TRACTION_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/fetch_downloads.py
 
       - name: Generate plots and update README

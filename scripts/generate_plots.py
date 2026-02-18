@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate trend plots from download data."""
+"""Generate trend plots from traction data."""
 
 import csv
 import os
@@ -24,6 +24,17 @@ TIME_WINDOWS = [
     ("365d", "Last 365 Days", 365),
     ("all", "All Time", None),
 ]
+
+SOURCE_LABELS = {
+    "pypi": "PyPI",
+    "npm": "npm",
+    "github_stars": "GitHub Stars",
+    "github_forks": "GitHub Forks",
+    "github_open_issues": "GitHub Open Issues",
+}
+
+# Sources that represent point-in-time snapshots rather than daily increments.
+SNAPSHOT_SOURCES = {"github_stars", "github_forks", "github_open_issues"}
 
 
 def load_data():
@@ -64,46 +75,36 @@ def generate_plot(series, window_label, window_name, days):
         print(f"  No data for {window_name}, skipping")
         return
 
-    # Separate by source
-    pypi_series = {k: v for k, v in filtered.items() if k[1] == "pypi"}
-    npm_series = {k: v for k, v in filtered.items() if k[1] == "npm"}
+    grouped_by_source = defaultdict(dict)
+    for (pkg, source), points in filtered.items():
+        grouped_by_source[source][(pkg, source)] = points
 
-    has_pypi = bool(pypi_series)
-    has_npm = bool(npm_series)
-    num_plots = has_pypi + has_npm
+    ordered_sources = []
+    for source in ["pypi", "npm", "github_stars", "github_forks", "github_open_issues"]:
+        if source in grouped_by_source:
+            ordered_sources.append(source)
+    for source in sorted(grouped_by_source.keys()):
+        if source not in ordered_sources:
+            ordered_sources.append(source)
+
+    num_plots = len(ordered_sources)
 
     if num_plots == 0:
         return
 
     fig, axes = plt.subplots(1, num_plots, figsize=(7 * num_plots, 5), squeeze=False)
-    fig.suptitle(f"Package Downloads — {window_name}", fontsize=14, fontweight="bold")
+    fig.suptitle(f"Traction Metrics — {window_name}", fontsize=14, fontweight="bold")
 
-    ax_idx = 0
-
-    if has_pypi:
+    for ax_idx, source in enumerate(ordered_sources):
         ax = axes[0][ax_idx]
-        ax_idx += 1
-        for (pkg, _), points in sorted(pypi_series.items()):
+        source_series = grouped_by_source[source]
+        for (pkg, _), points in sorted(source_series.items()):
             dates = [p[0] for p in points]
-            downloads = [p[1] for p in points]
-            ax.plot(dates, downloads, marker="o", markersize=3, linewidth=1.5, label=pkg)
-        ax.set_title("PyPI")
+            values = [p[1] for p in points]
+            ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
+        ax.set_title(SOURCE_LABELS.get(source, source))
         ax.set_xlabel("Date")
-        ax.set_ylabel("Downloads")
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-        ax.tick_params(axis="x", rotation=45)
-
-    if has_npm:
-        ax = axes[0][ax_idx]
-        for (pkg, _), points in sorted(npm_series.items()):
-            dates = [p[0] for p in points]
-            downloads = [p[1] for p in points]
-            ax.plot(dates, downloads, marker="o", markersize=3, linewidth=1.5, label=pkg)
-        ax.set_title("npm")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Downloads")
+        ax.set_ylabel("Value")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
@@ -126,12 +127,19 @@ def update_readme(series):
     table_rows = []
     for pkg, source in packages:
         points = series[(pkg, source)]
-        total_dl = sum(dl for _, dl in points)
-        table_rows.append(f"| {pkg} | {source} | {total_dl:,} |")
+        if source in SNAPSHOT_SOURCES:
+            metric = "Latest Value"
+            value = points[-1][1]
+        else:
+            metric = "Total Downloads"
+            value = sum(dl for _, dl in points)
+        table_rows.append(
+            f"| {pkg} | {SOURCE_LABELS.get(source, source)} | {metric} | {value:,} |"
+        )
 
     table = (
-        "| Package | Source | Total Downloads |\n"
-        "|---------|--------|----------------|\n"
+        "| Item | Source | Metric | Value |\n"
+        "|------|--------|--------|-------|\n"
         + "\n".join(table_rows)
     )
 
@@ -144,17 +152,17 @@ def update_readme(series):
 
     today = date.today().isoformat()
 
-    readme = f"""# Package Downloads Dashboard
+    readme = f"""# Traction Dashboard
 
-Automated daily tracking of package download counts from PyPI and npm.
+Automated daily tracking of package and repository traction metrics from PyPI, npm, and GitHub.
 
 **Last updated:** {today}
 
-## Tracked Packages
+## Tracked Items
 
 {table}
 
-## Download Trends
+## Metric Trends
 
 {"".join(chr(10) + s + chr(10) for s in plot_sections)}
 
