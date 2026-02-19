@@ -27,6 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TRACTION_GH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
         run: python scripts/fetch_downloads.py
 
       - name: Generate plots and update README

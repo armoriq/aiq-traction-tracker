@@ -4,6 +4,7 @@
 import csv
 import os
 import sys
+from collections import defaultdict
 from datetime import date, timedelta
 from typing import Dict, List
 
@@ -256,6 +257,127 @@ def fetch_github_repo_stats(config):
     return rows
 
 
+DISCORD_EPOCH = 1420070400000
+
+
+def discord_headers():
+    """Build Discord Bot API headers."""
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not token:
+        return None
+    return {"Authorization": f"Bot {token}"}
+
+
+def snowflake_from_datetime(dt):
+    """Convert a datetime to a Discord snowflake ID."""
+    import datetime as _dt
+    if isinstance(dt, date) and not isinstance(dt, _dt.datetime):
+        dt = _dt.datetime.combine(dt, _dt.time.min)
+    ts_ms = int(dt.timestamp() * 1000)
+    return (ts_ms - DISCORD_EPOCH) << 22
+
+
+def date_from_snowflake(snowflake_id):
+    """Extract a date from a Discord snowflake ID."""
+    import datetime as _dt
+    ts_ms = (int(snowflake_id) >> 22) + DISCORD_EPOCH
+    return _dt.datetime.fromtimestamp(ts_ms / 1000).date()
+
+
+def fetch_discord_stats(guild_id, existing_entries, backfill_days=90):
+    """Fetch guild member count and daily message counts using Bot API.
+
+    Backfills message counts for days not yet recorded, up to backfill_days.
+    """
+    headers = discord_headers()
+    if not headers:
+        print("  [WARN] DISCORD_BOT_TOKEN not set, skipping Discord")
+        return None
+
+    # Fetch guild info with approximate member count
+    url = f"https://discord.com/api/v10/guilds/{guild_id}?with_counts=true"
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        guild = resp.json()
+    except Exception as e:
+        print(f"  [ERROR] Discord guild fetch failed for {guild_id}: {e}")
+        return None
+
+    name = guild.get("name", str(guild_id))
+    member_count = guild.get("approximate_member_count", 0)
+
+    # Determine which days need message data
+    today = date.today()
+    start_date = today - timedelta(days=backfill_days)
+    days_needed = set()
+    for d in range(backfill_days):
+        day = start_date + timedelta(days=d)
+        if day >= today:
+            break
+        if (day.isoformat(), name, "discord_messages") not in existing_entries:
+            days_needed.add(day)
+
+    if not days_needed:
+        print(f"  -> All message days already recorded")
+        return {"name": name, "members": member_count, "messages_by_date": {}}
+
+    # Fetch channels
+    channels_url = f"https://discord.com/api/v10/guilds/{guild_id}/channels"
+    try:
+        resp = requests.get(channels_url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        channels = resp.json()
+    except Exception as e:
+        print(f"  [ERROR] Discord channels fetch failed: {e}")
+        return {"name": name, "members": member_count, "messages_by_date": None}
+
+    # Count messages per day across all text channels
+    earliest_needed = min(days_needed)
+    after_snowflake = snowflake_from_datetime(earliest_needed)
+
+    text_channel_types = {0, 5}  # GUILD_TEXT and GUILD_ANNOUNCEMENT
+    messages_by_date = defaultdict(int)
+
+    for channel in channels:
+        if channel.get("type") not in text_channel_types:
+            continue
+        ch_id = channel["id"]
+        messages_url = f"https://discord.com/api/v10/channels/{ch_id}/messages"
+        try:
+            after = str(after_snowflake)
+            while True:
+                resp = requests.get(
+                    messages_url,
+                    headers=headers,
+                    params={"after": after, "limit": 100},
+                    timeout=30,
+                )
+                if resp.status_code == 403:
+                    break
+                resp.raise_for_status()
+                msgs = resp.json()
+                if not msgs:
+                    break
+                for msg in msgs:
+                    msg_date = date_from_snowflake(msg["id"])
+                    if msg_date in days_needed:
+                        messages_by_date[msg_date] += 1
+                if len(msgs) < 100:
+                    break
+                # Messages returned newest-first; paginate with the oldest id
+                after = msgs[-1]["id"]
+        except Exception:
+            continue
+
+    # Fill in zeros for days with no messages
+    for day in days_needed:
+        if day not in messages_by_date:
+            messages_by_date[day] = 0
+
+    return {"name": name, "members": member_count, "messages_by_date": dict(messages_by_date)}
+
+
 def append_rows(rows):
     """Append rows to the CSV file, creating it with headers if needed."""
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -323,6 +445,38 @@ def main():
             github_added += 1
     if github_rows:
         print(f"GitHub rows fetched: {len(github_rows)}, {github_added} new")
+
+    discord_guilds = config.get("discord", []) or []
+    today = date.today().isoformat()
+    for guild_id in discord_guilds:
+        guild_id = str(guild_id)
+        print(f"Fetching Discord: {guild_id}")
+        result = fetch_discord_stats(guild_id, existing)
+        if result:
+            # Total members (snapshot, recorded for today)
+            key = (today, result["name"], "discord_members")
+            if key not in existing:
+                new_rows.append({
+                    "date": today,
+                    "package": result["name"],
+                    "source": "discord_members",
+                    "downloads": result["members"],
+                })
+                print(f"  -> {result['name']}: {result['members']} total members")
+            # Daily message counts
+            if result["messages_by_date"] is not None:
+                msg_added = 0
+                for day, count in sorted(result["messages_by_date"].items()):
+                    key = (day.isoformat(), result["name"], "discord_messages")
+                    if key not in existing:
+                        new_rows.append({
+                            "date": day.isoformat(),
+                            "package": result["name"],
+                            "source": "discord_messages",
+                            "downloads": count,
+                        })
+                        msg_added += 1
+                print(f"  -> {msg_added} days of message data added")
 
     if new_rows:
         append_rows(new_rows)

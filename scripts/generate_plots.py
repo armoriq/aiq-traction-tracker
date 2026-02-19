@@ -31,10 +31,12 @@ SOURCE_LABELS = {
     "github_stars": "GitHub Stars",
     "github_forks": "GitHub Forks",
     "github_open_issues": "GitHub Open Issues",
+    "discord_members": "Discord Members",
+    "discord_messages": "Discord Messages",
 }
 
 # Sources that represent point-in-time snapshots rather than daily increments.
-SNAPSHOT_SOURCES = {"github_stars", "github_forks", "github_open_issues"}
+SNAPSHOT_SOURCES = {"github_stars", "github_forks", "github_open_issues", "discord_members"}
 
 
 def load_data():
@@ -80,7 +82,7 @@ def generate_plot(series, window_label, window_name, days):
         grouped_by_source[source][(pkg, source)] = points
 
     ordered_sources = []
-    for source in ["pypi", "npm", "github_stars", "github_forks", "github_open_issues"]:
+    for source in ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]:
         if source in grouped_by_source:
             ordered_sources.append(source)
     for source in sorted(grouped_by_source.keys()):
@@ -92,11 +94,17 @@ def generate_plot(series, window_label, window_name, days):
     if num_plots == 0:
         return
 
-    fig, axes = plt.subplots(1, num_plots, figsize=(7 * num_plots, 5), squeeze=False)
+    ncols = min(2, num_plots)
+    nrows = (num_plots + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows), squeeze=False)
     fig.suptitle(f"Traction Metrics — {window_name}", fontsize=14, fontweight="bold")
 
+    # Hide unused axes
+    for i in range(num_plots, nrows * ncols):
+        axes[i // ncols][i % ncols].set_visible(False)
+
     for ax_idx, source in enumerate(ordered_sources):
-        ax = axes[0][ax_idx]
+        ax = axes[ax_idx // ncols][ax_idx % ncols]
         source_series = grouped_by_source[source]
         for (pkg, _), points in sorted(source_series.items()):
             dates = [p[0] for p in points]
