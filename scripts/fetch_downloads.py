@@ -332,17 +332,16 @@ def fetch_discord_stats(guild_id, existing_entries, backfill_days=90):
         print(f"  [ERROR] Discord channels fetch failed: {e}")
         return {"name": name, "members": member_count, "messages_by_date": None}
 
-    # Count messages per day across all text channels
+    # Count messages per day across all text channels and threads
     earliest_needed = min(days_needed)
     after_snowflake = snowflake_from_datetime(earliest_needed)
 
     text_channel_types = {0, 5}  # GUILD_TEXT and GUILD_ANNOUNCEMENT
+    thread_types = {10, 11, 12}  # ANNOUNCEMENT_THREAD, PUBLIC_THREAD, PRIVATE_THREAD
     messages_by_date = defaultdict(int)
 
-    for channel in channels:
-        if channel.get("type") not in text_channel_types:
-            continue
-        ch_id = channel["id"]
+    def count_messages_in_channel(ch_id):
+        """Count messages in a channel/thread from after_snowflake, bucketed by date."""
         messages_url = f"https://discord.com/api/v10/channels/{ch_id}/messages"
         try:
             after = str(after_snowflake)
@@ -365,10 +364,59 @@ def fetch_discord_stats(guild_id, existing_entries, backfill_days=90):
                         messages_by_date[msg_date] += 1
                 if len(msgs) < 100:
                     break
-                # Messages returned newest-first; paginate with the oldest id
                 after = msgs[-1]["id"]
         except Exception:
-            continue
+            pass
+
+    def fetch_archived_threads(ch_id):
+        """Fetch public and private archived threads for a channel."""
+        thread_ids = []
+        for kind in ["public", "private"]:
+            url = f"https://discord.com/api/v10/channels/{ch_id}/threads/archived/{kind}"
+            try:
+                resp = requests.get(url, headers=headers, timeout=30)
+                if resp.status_code == 403:
+                    continue
+                resp.raise_for_status()
+                for t in resp.json().get("threads", []):
+                    thread_ids.append(t["id"])
+            except Exception:
+                continue
+        return thread_ids
+
+    # Collect all channel IDs to scan (text channels + threads)
+    channel_ids = []
+    text_channel_ids = []
+    for channel in channels:
+        if channel.get("type") in text_channel_types:
+            channel_ids.append(channel["id"])
+            text_channel_ids.append(channel["id"])
+        elif channel.get("type") in thread_types:
+            channel_ids.append(channel["id"])
+
+    # Fetch active threads
+    try:
+        resp = requests.get(
+            f"https://discord.com/api/v10/guilds/{guild_id}/threads/active",
+            headers=headers, timeout=30,
+        )
+        if resp.status_code == 200:
+            for t in resp.json().get("threads", []):
+                if t["id"] not in channel_ids:
+                    channel_ids.append(t["id"])
+    except Exception:
+        pass
+
+    # Fetch archived threads from each text channel
+    for ch_id in text_channel_ids:
+        for t_id in fetch_archived_threads(ch_id):
+            if t_id not in channel_ids:
+                channel_ids.append(t_id)
+
+    print(f"  -> Scanning {len(channel_ids)} channels/threads")
+
+    for ch_id in channel_ids:
+        count_messages_in_channel(ch_id)
 
     # Fill in zeros for days with no messages
     for day in days_needed:
