@@ -70,60 +70,54 @@ def filter_by_window(series, days):
     return filtered
 
 
-def generate_plot(series, window_label, window_name, days):
-    """Generate a single plot for a time window."""
+SOURCE_ORDER = ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]
+
+
+def generate_plots(series, window_label, window_name, days):
+    """Generate one PNG per source for a time window. Returns list of (source, path)."""
     filtered = filter_by_window(series, days)
     if not filtered:
         print(f"  No data for {window_name}, skipping")
-        return
+        return []
 
     grouped_by_source = defaultdict(dict)
     for (pkg, source), points in filtered.items():
         grouped_by_source[source][(pkg, source)] = points
 
     ordered_sources = []
-    for source in ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]:
+    for source in SOURCE_ORDER:
         if source in grouped_by_source:
             ordered_sources.append(source)
     for source in sorted(grouped_by_source.keys()):
         if source not in ordered_sources:
             ordered_sources.append(source)
 
-    num_plots = len(ordered_sources)
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+    generated = []
 
-    if num_plots == 0:
-        return
-
-    ncols = min(2, num_plots)
-    nrows = (num_plots + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 5 * nrows), squeeze=False)
-    fig.suptitle(f"Traction Metrics — {window_name}", fontsize=14, fontweight="bold")
-
-    # Hide unused axes
-    for i in range(num_plots, nrows * ncols):
-        axes[i // ncols][i % ncols].set_visible(False)
-
-    for ax_idx, source in enumerate(ordered_sources):
-        ax = axes[ax_idx // ncols][ax_idx % ncols]
+    for source in ordered_sources:
         source_series = grouped_by_source[source]
+        fig, ax = plt.subplots(figsize=(7, 4))
         for (pkg, _), points in sorted(source_series.items()):
             dates = [p[0] for p in points]
             values = [p[1] for p in points]
             ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
-        ax.set_title(SOURCE_LABELS.get(source, source))
+        ax.set_title(f"{SOURCE_LABELS.get(source, source)} — {window_name}", fontsize=12, fontweight="bold")
         ax.set_xlabel("Date")
         ax.set_ylabel("Value")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
         ax.tick_params(axis="x", rotation=45)
+        plt.tight_layout()
+        filename = f"{source}_{window_label}.png"
+        path = os.path.join(PLOTS_DIR, filename)
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        generated.append((source, filename))
 
-    plt.tight_layout()
-    os.makedirs(PLOTS_DIR, exist_ok=True)
-    path = os.path.join(PLOTS_DIR, f"downloads_{window_label}.png")
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved {path}")
+    print(f"  {window_name}: saved {len(generated)} plots")
+    return generated
 
 
 def update_readme(series):
@@ -151,13 +145,6 @@ def update_readme(series):
         + "\n".join(table_rows)
     )
 
-    # Build plot sections
-    plot_sections = []
-    for label, name, _ in TIME_WINDOWS:
-        plot_path = os.path.join(PLOTS_DIR, f"downloads_{label}.png")
-        if os.path.exists(plot_path):
-            plot_sections.append(f"### {name}\n\n![Downloads — {name}](plots/downloads_{label}.png)")
-
     today = date.today().isoformat()
 
     readme = f"""# Traction Dashboard
@@ -172,9 +159,33 @@ Automated daily tracking of package and repository traction metrics from PyPI, n
 
 ## Metric Trends
 
-{"".join(chr(10) + s + chr(10) for s in plot_sections)}
+"""
 
----
+    for label, name, _ in TIME_WINDOWS:
+        # Collect plots that exist for this window
+        plot_cells = []
+        for source in SOURCE_ORDER:
+            filename = f"{source}_{label}.png"
+            if os.path.exists(os.path.join(PLOTS_DIR, filename)):
+                plot_cells.append(
+                    f'<td align="center"><img src="plots/{filename}" width="100%"></td>'
+                )
+        if not plot_cells:
+            continue
+
+        plot_rows = []
+        for i in range(0, len(plot_cells), 2):
+            pair = plot_cells[i:i + 2]
+            if len(pair) == 1:
+                pair.append("<td></td>")
+            plot_rows.append(f"<tr>{''.join(pair)}</tr>")
+
+        readme += f"### {name}\n\n"
+        readme += '<table width="100%">\n'
+        readme += "\n".join(plot_rows)
+        readme += "\n</table>\n\n"
+
+    readme += """---
 
 *Updated daily by [GitHub Actions](.github/workflows/update.yml). Edit [config.yaml](config.yaml) to add or remove packages.*
 """
@@ -195,7 +206,7 @@ def main():
 
     print("Generating plots...")
     for label, name, days in TIME_WINDOWS:
-        generate_plot(series, label, name, days)
+        generate_plots(series, label, name, days)
 
     print("Updating README...")
     update_readme(series)

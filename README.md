@@ -10,7 +10,7 @@ Automated daily tracking of package and repository traction metrics from PyPI, n
 |------|--------|--------|-------|
 | @armoriq/armorclaw | npm | Total Downloads | 29 |
 | @armoriq/sdk | npm | Total Downloads | 114 |
-| ArmorIQ | Discord Members | Latest Value | 23 |
+| ArmorIQ | Discord Members | Latest Value | 255 |
 | ArmorIQ | Discord Messages | Total Downloads | 138 |
 | armoriq-openclaw-plugin | npm | Total Downloads | 186 |
 | armoriq-sdk | PyPI | Total Downloads | 3,454 |
@@ -26,27 +26,50 @@ Automated daily tracking of package and repository traction metrics from PyPI, n
 
 ## Metric Trends
 
-
 ### Last 7 Days
 
-![Downloads — Last 7 Days](plots/downloads_7d.png)
+<table width="100%">
+<tr><td align="center"><img src="plots/pypi_7d.png" width="100%"></td><td align="center"><img src="plots/npm_7d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_stars_7d.png" width="100%"></td><td align="center"><img src="plots/github_forks_7d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_open_issues_7d.png" width="100%"></td><td align="center"><img src="plots/discord_members_7d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/discord_messages_7d.png" width="100%"></td><td></td></tr>
+</table>
 
 ### Last 14 Days
 
-![Downloads — Last 14 Days](plots/downloads_14d.png)
+<table width="100%">
+<tr><td align="center"><img src="plots/pypi_14d.png" width="100%"></td><td align="center"><img src="plots/npm_14d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_stars_14d.png" width="100%"></td><td align="center"><img src="plots/github_forks_14d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_open_issues_14d.png" width="100%"></td><td align="center"><img src="plots/discord_members_14d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/discord_messages_14d.png" width="100%"></td><td></td></tr>
+</table>
 
 ### Last 30 Days
 
-![Downloads — Last 30 Days](plots/downloads_30d.png)
+<table width="100%">
+<tr><td align="center"><img src="plots/pypi_30d.png" width="100%"></td><td align="center"><img src="plots/npm_30d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_stars_30d.png" width="100%"></td><td align="center"><img src="plots/github_forks_30d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_open_issues_30d.png" width="100%"></td><td align="center"><img src="plots/discord_members_30d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/discord_messages_30d.png" width="100%"></td><td></td></tr>
+</table>
 
 ### Last 365 Days
 
-![Downloads — Last 365 Days](plots/downloads_365d.png)
+<table width="100%">
+<tr><td align="center"><img src="plots/pypi_365d.png" width="100%"></td><td align="center"><img src="plots/npm_365d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_stars_365d.png" width="100%"></td><td align="center"><img src="plots/github_forks_365d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_open_issues_365d.png" width="100%"></td><td align="center"><img src="plots/discord_members_365d.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/discord_messages_365d.png" width="100%"></td><td></td></tr>
+</table>
 
 ### All Time
 
-![Downloads — All Time](plots/downloads_all.png)
-
+<table width="100%">
+<tr><td align="center"><img src="plots/pypi_all.png" width="100%"></td><td align="center"><img src="plots/npm_all.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_stars_all.png" width="100%"></td><td align="center"><img src="plots/github_forks_all.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/github_open_issues_all.png" width="100%"></td><td align="center"><img src="plots/discord_members_all.png" width="100%"></td></tr>
+<tr><td align="center"><img src="plots/discord_messages_all.png" width="100%"></td><td></td></tr>
+</table>
 
 ---
 
