@@ -72,10 +72,27 @@ def filter_by_window(series, days):
 
 SOURCE_ORDER = ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]
 
+# Sources to plot as cumulative totals instead of daily values.
+CUMULATIVE_SOURCES = {"pypi", "npm"}
 
-def generate_plots(series, window_label, window_name, days):
-    """Generate one PNG per source for a time window. Returns list of (source, path)."""
-    filtered = filter_by_window(series, days)
+
+def make_cumulative(points):
+    """Convert a sorted list of (date, value) into cumulative (date, running_total)."""
+    cumulative = []
+    total = 0
+    for d, v in points:
+        total += v
+        cumulative.append((d, total))
+    return cumulative
+
+
+def generate_plots(all_series, window_label, window_name, days):
+    """Generate one PNG per source for a time window. Returns list of (source, path).
+
+    For cumulative sources (pypi, npm), the cumulative total is computed from
+    all available data, then the plot is windowed to the requested range.
+    """
+    filtered = filter_by_window(all_series, days)
     if not filtered:
         print(f"  No data for {window_name}, skipping")
         return []
@@ -98,13 +115,30 @@ def generate_plots(series, window_label, window_name, days):
     for source in ordered_sources:
         source_series = grouped_by_source[source]
         fig, ax = plt.subplots(figsize=(7, 4))
-        for (pkg, _), points in sorted(source_series.items()):
-            dates = [p[0] for p in points]
-            values = [p[1] for p in points]
-            ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
+
+        if source in CUMULATIVE_SOURCES:
+            # Compute cumulative from full history, then filter to window
+            cutoff = date.today() - timedelta(days=days) if days else None
+            for (pkg, src), _ in sorted(source_series.items()):
+                full_points = all_series.get((pkg, src), [])
+                cum_points = make_cumulative(full_points)
+                if cutoff:
+                    cum_points = [(d, v) for d, v in cum_points if d >= cutoff]
+                if cum_points:
+                    dates = [p[0] for p in cum_points]
+                    values = [p[1] for p in cum_points]
+                    ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
+            ylabel = "Cumulative Downloads"
+        else:
+            for (pkg, _), points in sorted(source_series.items()):
+                dates = [p[0] for p in points]
+                values = [p[1] for p in points]
+                ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
+            ylabel = "Value"
+
         ax.set_title(f"{SOURCE_LABELS.get(source, source)} — {window_name}", fontsize=12, fontweight="bold")
         ax.set_xlabel("Date")
-        ax.set_ylabel("Value")
+        ax.set_ylabel(ylabel)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
