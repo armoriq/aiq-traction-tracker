@@ -73,7 +73,7 @@ def filter_by_window(series, days):
 SOURCE_ORDER = ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]
 
 # Sources to plot as cumulative totals instead of daily values.
-CUMULATIVE_SOURCES = {"pypi", "npm"}
+CUMULATIVE_SOURCES = {"pypi", "npm", "discord_messages"}
 
 
 def make_cumulative(points):
@@ -128,7 +128,7 @@ def generate_plots(all_series, window_label, window_name, days):
                     dates = [p[0] for p in cum_points]
                     values = [p[1] for p in cum_points]
                     ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
-            ylabel = "Cumulative Downloads"
+            ylabel = "Cumulative Messages" if source == "discord_messages" else "Cumulative Downloads"
         else:
             for (pkg, _), points in sorted(source_series.items()):
                 dates = [p[0] for p in points]
@@ -166,6 +166,9 @@ def update_readme(series):
         if source in SNAPSHOT_SOURCES:
             metric = "Latest Value"
             value = points[-1][1]
+        elif source == "discord_messages":
+            metric = "Total Messages"
+            value = sum(dl for _, dl in points)
         else:
             metric = "Total Downloads"
             value = sum(dl for _, dl in points)
