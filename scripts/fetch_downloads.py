@@ -18,22 +18,49 @@ CSV_PATH = os.path.join(DATA_DIR, "downloads.csv")
 
 CSV_HEADERS = ["date", "package", "source", "downloads"]
 
+# Re-fetch npm/pypi data for the last N days on every run. npm's analytics
+# pipeline can update daily counts retroactively, so entries recorded with 0
+# may later have real values.
+RECENCY_DAYS = 7
+
 
 def load_config():
     with open(CONFIG_PATH) as f:
         return yaml.safe_load(f)
 
 
-def load_existing_entries():
-    """Return a set of (date, package, source) tuples already recorded."""
-    entries = set()
+def load_existing_data():
+    """Return a dict mapping (date, package, source) → downloads for all rows."""
+    data = {}
     if not os.path.exists(CSV_PATH):
-        return entries
+        return data
     with open(CSV_PATH, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            entries.add((row["date"], row["package"], row["source"]))
-    return entries
+            key = (row["date"], row["package"], row["source"])
+            data[key] = int(row["downloads"])
+    return data
+
+
+def rewrite_csv_with_updates(updates: Dict[tuple, int]):
+    """Overwrite specific rows in the CSV with new download counts.
+
+    updates: mapping of (date, package, source) → new downloads value
+    """
+    if not updates or not os.path.exists(CSV_PATH):
+        return
+    rows = []
+    with open(CSV_PATH, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            key = (row["date"], row["package"], row["source"])
+            if key in updates:
+                row["downloads"] = str(updates[key])
+            rows.append(row)
+    with open(CSV_PATH, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def fetch_pypi_downloads(package):
@@ -439,8 +466,11 @@ def append_rows(rows):
 
 def main():
     config = load_config()
-    existing = load_existing_entries()
+    existing = load_existing_data()
     new_rows = []
+    csv_updates: Dict[tuple, int] = {}
+
+    recency_cutoff = (date.today() - timedelta(days=RECENCY_DAYS)).isoformat()
 
     pypi_packages = config.get("pypi", []) or []
     npm_packages = config.get("npm", []) or []
@@ -457,9 +487,10 @@ def main():
     for pkg in pypi_packages:
         print(f"Fetching PyPI: {pkg}")
         results = fetch_pypi_downloads(pkg)
-        added = 0
+        added = updated = 0
         for result in results:
-            if (result["date"], pkg, "pypi") not in existing:
+            key = (result["date"], pkg, "pypi")
+            if key not in existing:
                 new_rows.append({
                     "date": result["date"],
                     "package": pkg,
@@ -467,14 +498,18 @@ def main():
                     "downloads": result["downloads"],
                 })
                 added += 1
-        print(f"  -> {len(results)} data points fetched, {added} new")
+            elif result["date"] >= recency_cutoff and result["downloads"] != existing[key]:
+                csv_updates[key] = result["downloads"]
+                updated += 1
+        print(f"  -> {len(results)} data points fetched, {added} new, {updated} updated")
 
     for pkg in npm_packages:
         print(f"Fetching npm: {pkg}")
         results = fetch_npm_downloads(pkg)
-        added = 0
+        added = updated = 0
         for result in results:
-            if (result["date"], pkg, "npm") not in existing:
+            key = (result["date"], pkg, "npm")
+            if key not in existing:
                 new_rows.append({
                     "date": result["date"],
                     "package": pkg,
@@ -482,7 +517,10 @@ def main():
                     "downloads": result["downloads"],
                 })
                 added += 1
-        print(f"  -> {len(results)} data points fetched, {added} new")
+            elif result["date"] >= recency_cutoff and result["downloads"] != existing[key]:
+                csv_updates[key] = result["downloads"]
+                updated += 1
+        print(f"  -> {len(results)} data points fetched, {added} new, {updated} updated")
 
     github_rows = fetch_github_repo_stats(config)
     github_added = 0
@@ -526,10 +564,15 @@ def main():
                         msg_added += 1
                 print(f"  -> {msg_added} days of message data added")
 
+    if csv_updates:
+        rewrite_csv_with_updates(csv_updates)
+        print(f"\nUpdated {len(csv_updates)} existing entries in {CSV_PATH}")
+
     if new_rows:
         append_rows(new_rows)
-        print(f"\nAppended {len(new_rows)} new entries to {CSV_PATH}")
-    else:
+        print(f"Appended {len(new_rows)} new entries to {CSV_PATH}")
+
+    if not csv_updates and not new_rows:
         print("\nNo new data to append.")
 
     return 0
