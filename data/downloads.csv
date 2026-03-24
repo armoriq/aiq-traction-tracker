@@ -1663,7 +1663,7 @@ date,package,source,downloads
 2026-03-18,ArmorIQ,discord_messages,1
 2026-03-19,@armoriq/sdk,npm,0
 2026-03-19,armoriq-openclaw-plugin,npm,0
-2026-03-19,@armoriq/armorclaw,npm,0
+2026-03-19,@armoriq/armorclaw,npm,1
 2026-03-20,armoriq/armorclaw,github_stars,12
 2026-03-20,armoriq/armorclaw,github_forks,0
 2026-03-20,armoriq/armorclaw,github_open_issues,1
@@ -1721,3 +1721,17 @@ date,package,source,downloads
 2026-03-23,armoriq/conmap,github_open_issues,4
 2026-03-23,ArmorIQ,discord_members,423
 2026-03-22,ArmorIQ,discord_messages,0
+2026-03-23,@armoriq/sdk,npm,0
+2026-03-23,armoriq-openclaw-plugin,npm,0
+2026-03-23,@armoriq/armorclaw,npm,0
+2026-03-24,armoriq/armorclaw,github_stars,12
+2026-03-24,armoriq/armorclaw,github_forks,0
+2026-03-24,armoriq/armorclaw,github_open_issues,2
+2026-03-24,armoriq/armoriq-sdk-customer,github_stars,3
+2026-03-24,armoriq/armoriq-sdk-customer,github_forks,1
+2026-03-24,armoriq/armoriq-sdk-customer,github_open_issues,2
+2026-03-24,armoriq/conmap,github_stars,4
+2026-03-24,armoriq/conmap,github_forks,1
+2026-03-24,armoriq/conmap,github_open_issues,4
+2026-03-24,ArmorIQ,discord_members,424
+2026-03-23,ArmorIQ,discord_messages,0
