@@ -2,21 +2,21 @@
 
 Automated daily tracking of package and repository traction metrics from PyPI, npm, and GitHub.
 
-**Last updated:** 2026-04-05
+**Last updated:** 2026-04-06
 
 ## Tracked Items
 
 | Item | Source | Metric | Value |
 |------|--------|--------|-------|
 | @armoriq/armorclaw | npm | Total Downloads | 137 |
-| @armoriq/sdk | npm | Total Downloads | 708 |
-| ArmorIQ | Discord Members | Latest Value | 498 |
+| @armoriq/sdk | npm | Total Downloads | 745 |
+| ArmorIQ | Discord Members | Latest Value | 497 |
 | ArmorIQ | Discord Messages | Total Messages | 586 |
 | armoriq-openclaw-plugin | npm | Total Downloads | 204 |
-| armoriq-sdk | PyPI | Total Downloads | 5,155 |
+| armoriq-sdk | PyPI | Total Downloads | 5,260 |
 | armoriq/armorclaw | GitHub Forks | Latest Value | 0 |
 | armoriq/armorclaw | GitHub Open Issues | Latest Value | 1 |
-| armoriq/armorclaw | GitHub Stars | Latest Value | 209 |
+| armoriq/armorclaw | GitHub Stars | Latest Value | 207 |
 | armoriq/armoriq-sdk-customer | GitHub Forks | Latest Value | 1 |
 | armoriq/armoriq-sdk-customer | GitHub Open Issues | Latest Value | 0 |
 | armoriq/armoriq-sdk-customer | GitHub Stars | Latest Value | 3 |
