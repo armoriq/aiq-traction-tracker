@@ -1968,7 +1968,7 @@ date,package,source,downloads
 2026-04-09,ArmorIQ,discord_members,502
 2026-04-08,ArmorIQ,discord_messages,1
 2026-04-09,armoriq-sdk,pypi,7
-2026-04-09,@armoriq/sdk,npm,0
+2026-04-09,@armoriq/sdk,npm,25
 2026-04-09,@armoriq/armorclaw,npm,0
 2026-04-10,armoriq/armorclaw,github_stars,202
 2026-04-10,armoriq/armorclaw,github_forks,0
@@ -1981,3 +1981,16 @@ date,package,source,downloads
 2026-04-10,armoriq/conmap,github_open_issues,4
 2026-04-10,ArmorIQ,discord_members,500
 2026-04-09,ArmorIQ,discord_messages,0
+2026-04-10,@armoriq/sdk,npm,0
+2026-04-10,@armoriq/armorclaw,npm,0
+2026-04-11,armoriq/armorclaw,github_stars,199
+2026-04-11,armoriq/armorclaw,github_forks,0
+2026-04-11,armoriq/armorclaw,github_open_issues,2
+2026-04-11,armoriq/armoriq-sdk-customer,github_stars,3
+2026-04-11,armoriq/armoriq-sdk-customer,github_forks,1
+2026-04-11,armoriq/armoriq-sdk-customer,github_open_issues,0
+2026-04-11,armoriq/conmap,github_stars,4
+2026-04-11,armoriq/conmap,github_forks,1
+2026-04-11,armoriq/conmap,github_open_issues,4
+2026-04-11,ArmorIQ,discord_members,499
+2026-04-10,ArmorIQ,discord_messages,0
