@@ -161,6 +161,7 @@ def update_readme(series):
     # Build package table
     packages = sorted(set(series.keys()))
     table_rows = []
+    pkg_download_total = 0
     for pkg, source in packages:
         points = series[(pkg, source)]
         if source in SNAPSHOT_SOURCES:
@@ -172,11 +173,14 @@ def update_readme(series):
         else:
             metric = "Total Downloads"
             value = sum(dl for _, dl in points)
+            if source in {"pypi", "npm"}:
+                pkg_download_total += value
         table_rows.append(
             f"| {pkg} | {SOURCE_LABELS.get(source, source)} | {metric} | {value:,} |"
         )
 
     table = (
+        f"**Total downloads (PyPI + npm):** {pkg_download_total:,}\n\n"
         "| Item | Source | Metric | Value |\n"
         "|------|--------|--------|-------|\n"
         + "\n".join(table_rows)

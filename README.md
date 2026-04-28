@@ -6,6 +6,8 @@ Automated daily tracking of package and repository traction metrics from PyPI, n
 
 ## Tracked Items
 
+**Total downloads (PyPI + npm):** 9,516
+
 | Item | Source | Metric | Value |
 |------|--------|--------|-------|
 | @armoriq/armorclaw | npm | Total Downloads | 681 |
