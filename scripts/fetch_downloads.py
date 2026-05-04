@@ -221,6 +221,38 @@ def fetch_repo_by_full_name(full_name, headers):
     return resp.json()
 
 
+def fetch_github_repo_clones(full_name, headers):
+    """
+    Fetch the rolling 14-day daily clone counts for a single repo.
+
+    Requires push access on the repo (the /traffic/clones endpoint is gated).
+    Returns a list of {date, downloads} dicts where downloads = total clone count
+    for that day. Days the API omits (no activity) are not filled — daily-cron
+    appends will simply skip them.
+    """
+    url = f"https://api.github.com/repos/{full_name}/traffic/clones"
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code in (403, 404):
+            print(f"  [WARN] /traffic/clones not accessible for {full_name} "
+                  f"(status {resp.status_code}); token likely lacks push access")
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"  [ERROR] GitHub clones fetch failed for {full_name}: {e}")
+        return []
+
+    results = []
+    for entry in data.get("clones", []):
+        ts = entry.get("timestamp", "")
+        day = ts[:10] if len(ts) >= 10 else ""
+        if not day:
+            continue
+        results.append({"date": day, "downloads": int(entry.get("count", 0))})
+    return results
+
+
 def fetch_github_repo_stats(config):
     """
     Fetch GitHub repo traction metrics.
@@ -229,6 +261,8 @@ def fetch_github_repo_stats(config):
     - github_stars
     - github_forks
     - github_open_issues
+    - github_clones (rolling 14-day daily totals; only populated when the token
+      has push access to the repo)
     """
     owners, explicit_repos = parse_github_config(config)
     if not owners and not explicit_repos:
@@ -279,6 +313,17 @@ def fetch_github_repo_stats(config):
                 "downloads": open_issues,
             },
         ])
+
+        clone_entries = fetch_github_repo_clones(full_name, headers)
+        for entry in clone_entries:
+            rows.append({
+                "date": entry["date"],
+                "package": full_name,
+                "source": "github_clones",
+                "downloads": entry["downloads"],
+            })
+        if clone_entries:
+            print(f"  -> {len(clone_entries)} day(s) of clone data for {full_name}")
 
     print(f"Collected GitHub stats for {len(repos_by_name)} repo(s)")
     return rows

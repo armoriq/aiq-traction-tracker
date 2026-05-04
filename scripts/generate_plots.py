@@ -31,6 +31,7 @@ SOURCE_LABELS = {
     "github_stars": "GitHub Stars",
     "github_forks": "GitHub Forks",
     "github_open_issues": "GitHub Open Issues",
+    "github_clones": "GitHub Clones",
     "discord_members": "Discord Members",
     "discord_messages": "Discord Messages",
 }
@@ -70,10 +71,15 @@ def filter_by_window(series, days):
     return filtered
 
 
-SOURCE_ORDER = ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "discord_members", "discord_messages"]
+SOURCE_ORDER = ["pypi", "npm", "github_stars", "github_forks", "github_open_issues", "github_clones", "discord_members", "discord_messages"]
 
 # Sources to plot as cumulative totals instead of daily values.
-CUMULATIVE_SOURCES = {"pypi", "npm", "discord_messages"}
+CUMULATIVE_SOURCES = {"pypi", "npm", "discord_messages", "github_clones"}
+
+# Sources whose cumulative totals contribute to the headline "Total downloads"
+# figure in the README.
+DOWNLOAD_TOTAL_SOURCES = {"pypi", "npm", "github_clones"}
+DOWNLOAD_TOTAL_LABEL = "PyPI + npm + GitHub clones"
 
 
 def make_cumulative(points):
@@ -136,13 +142,14 @@ def generate_plots(all_series, window_label, window_name, days):
                 ax.plot(dates, values, marker="o", markersize=3, linewidth=1.5, label=pkg)
             ylabel = "Value"
 
-        ax.set_title(f"{SOURCE_LABELS.get(source, source)} — {window_name}", fontsize=12, fontweight="bold")
-        ax.set_xlabel("Date")
-        ax.set_ylabel(ylabel)
-        ax.legend(fontsize=8)
+        ax.set_title(f"{SOURCE_LABELS.get(source, source)} — {window_name}", fontsize=16, fontweight="bold")
+        ax.set_xlabel("Date", fontsize=14)
+        ax.set_ylabel(ylabel, fontsize=14)
+        ax.legend(fontsize=14)
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-        ax.tick_params(axis="x", rotation=45)
+        ax.tick_params(axis="x", rotation=45, labelsize=14)
+        ax.tick_params(axis="y", labelsize=14)
         plt.tight_layout()
         filename = f"{source}_{window_label}.png"
         path = os.path.join(PLOTS_DIR, filename)
@@ -173,14 +180,14 @@ def update_readme(series):
         else:
             metric = "Total Downloads"
             value = sum(dl for _, dl in points)
-            if source in {"pypi", "npm"}:
+            if source in DOWNLOAD_TOTAL_SOURCES:
                 pkg_download_total += value
         table_rows.append(
             f"| {pkg} | {SOURCE_LABELS.get(source, source)} | {metric} | {value:,} |"
         )
 
     table = (
-        f"**Total downloads (PyPI + npm):** {pkg_download_total:,}\n\n"
+        f"**Total downloads ({DOWNLOAD_TOTAL_LABEL}):** {pkg_download_total:,}\n\n"
         "| Item | Source | Metric | Value |\n"
         "|------|--------|--------|-------|\n"
         + "\n".join(table_rows)
