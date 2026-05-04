@@ -11,6 +11,7 @@ github:
     - armoriq/armorclaw
     - armoriq/armoriq-sdk-customer
     - armoriq/conmap
+    - armoriq/armorClaude
 
 discord:
   - 1450796662334423135
