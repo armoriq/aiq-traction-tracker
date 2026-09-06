@@ -1,0 +1,107 @@
+# Enforces the org-wide PR size cap.
+#
+# Deploy target: armoriq/.github  ->  .github/workflows/pr-size.yml
+# Enforced via the org ruleset's `workflows` rule, so it runs on every repo
+# the ruleset covers without needing a copy in each repo.
+#
+# Policy: a PR may change at most MAX_LINES lines (additions + deletions)
+# across at most MAX_FILES files. Lockfiles are excluded — they are
+# machine-generated and carry no review burden. In the historical data,
+# lockfiles alone pushed several 11-line dependency bumps past the
+# 1000-line threshold.
+name: PR size
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Rapid pushes to the same PR queue redundant runs; keep only the newest.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MAX_LINES: "1000"
+  MAX_FILES: "100"
+
+jobs:
+  size:
+    # `edited` fires on title/body edits too, not just base changes. Run on all
+    # of them: a skipped run still concludes success and (combined with
+    # cancel-in-progress) would let a title edit cancel the real check and take
+    # the PR green. Re-measuring is one API call — always run instead.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Measure PR size
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          EXCLUDE: '(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|npm-shrinkwrap\.json|poetry\.lock|Pipfile\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.lock|uv\.lock|flake\.lock|bun\.lockb?)$'
+        run: |
+          set -euo pipefail
+
+          # --- Promotion exemption --------------------------------------------
+          # Promotions bundle every commit since the last release and cannot be
+          # split. Matches the branch shapes actually in use in this org.
+          # Same-repo PRs only: on a fork PR the head branch name is whatever
+          # the author chose in their fork, so it can never claim the exemption.
+          if [ "$HEAD_REPO" = "$REPO" ] && \
+             echo "$BASE" | grep -qEi '^(main|master|prod|production)$' && \
+             echo "$HEAD" | grep -qEi '^(dev|develop|development|staging|stage|next|qa|uat)$|^releases?/'; then
+            echo "::notice::Promotion PR ($HEAD -> $BASE) — size check skipped."
+            {
+              echo "### PR size check :white_check_mark:"
+              echo ""
+              echo "Promotion PR (\`$HEAD\` -> \`$BASE\`) — exempt from the size cap."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # --- Collect changed files ------------------------------------------
+          # The files API caps at 3000 entries — far past MAX_FILES, so
+          # truncation can never produce a false PASS.
+          gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '.[] | [.filename, (.additions + .deletions)] | @tsv' > files.tsv
+
+          # EXCLUDE reaches awk via ENVIRON (not -v) so its backslashes survive.
+          read -r total counted excluded < <(awk -F'\t' '
+            $1 ~ ENVIRON["EXCLUDE"] { e += $2; next }
+            NF { t += $2; c++ }
+            END { printf "%d %d %d\n", t, c, e }' files.tsv)
+
+          echo "Changed lines (excluding lockfiles): $total across $counted files"
+
+          {
+            echo "### PR size check"
+            echo ""
+            echo "| | |"
+            echo "|---|---:|"
+            echo "| Changed lines counted | **$total** |"
+            echo "| Line limit | $MAX_LINES |"
+            echo "| Files counted | **$counted** |"
+            echo "| File limit | $MAX_FILES |"
+            echo "| Lockfile lines excluded | $excluded |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$total" -gt "$MAX_LINES" ] || [ "$counted" -gt "$MAX_FILES" ]; then
+            {
+              echo ""
+              [ "$total" -gt "$MAX_LINES" ] && echo "**Over the line limit by $(( total - MAX_LINES )) lines.**"
+              [ "$counted" -gt "$MAX_FILES" ] && echo "**Over the file limit by $(( counted - MAX_FILES )) files.**"
+              echo ""
+              echo "Split this into PRs that can each be reviewed on their own."
+              echo "Pure refactors, moves and renames are usually the easiest slice to separate out."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::PR is $total changed lines across $counted files (limits: $MAX_LINES lines, $MAX_FILES files). Please split it."
+            exit 1
+          fi
+
+          echo "::notice::PR size $total lines / $MAX_LINES, $counted files / $MAX_FILES — OK"
