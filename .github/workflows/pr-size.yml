@@ -30,6 +30,10 @@ env:
 
 jobs:
   size:
+    # The job name becomes the status-check name that branch rules require, so
+    # it must be explicit and stable. Without it the check is called "size",
+    # which is too generic to require confidently across repos.
+    name: PR size
     # `edited` fires on title/body edits too, not just base changes. Run on all
     # of them: a skipped run still concludes success and (combined with
     # cancel-in-progress) would let a title edit cancel the real check and take
@@ -66,10 +70,45 @@ jobs:
           fi
 
           # --- Collect changed files ------------------------------------------
-          # The files API caps at 3000 entries — far past MAX_FILES, so
-          # truncation can never produce a false PASS.
+          # The files API returns at most 3000 entries, however many the PR
+          # really touches:
+          #   https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files
+          #
+          # That cap cannot be treated as harmless. Exclusions are applied
+          # AFTER retrieval, so a truncated set can be whittled below both
+          # limits and pass — e.g. a PR whose first 3000 returned entries are
+          # all lockfiles would measure 0 lines across 0 files.
+          #
+          # This is not theoretical here: sdk-adk-test-agent-py#1 reports
+          # changed_files=3602 and the endpoint returns exactly 3000.
+          #
+          # So compare what we retrieved against the PR's own changed_files and
+          # fail closed if the picture is incomplete. Never guess at a size we
+          # could not measure.
           gh api "repos/$REPO/pulls/$PR/files" --paginate \
             --jq '.[] | [.filename, (.additions + .deletions)] | @tsv' > files.tsv
+
+          expected=$(gh api "repos/$REPO/pulls/$PR" --jq '.changed_files')
+          retrieved=$(wc -l < files.tsv)
+          echo "Files retrieved: $retrieved of $expected reported by the PR"
+
+          if [ "$retrieved" -lt "$expected" ]; then
+            {
+              echo "### PR size check :x:"
+              echo ""
+              echo "**Cannot measure this PR.**"
+              echo ""
+              echo "It reports **$expected** changed files, but GitHub returned only"
+              echo "**$retrieved** (the files API stops at 3000). The size cannot be"
+              echo "determined, so the check fails rather than guess."
+              echo ""
+              echo "A PR this wide is over the $MAX_FILES file limit regardless."
+              echo "Split it, or check whether build output or dependencies were"
+              echo "committed by mistake."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Cannot measure PR size: $expected changed files reported, only $retrieved retrievable (API caps at 3000). Failing closed."
+            exit 1
+          fi
 
           # EXCLUDE reaches awk via ENVIRON (not -v) so its backslashes survive.
           read -r total counted excluded < <(awk -F'\t' '
