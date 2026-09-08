@@ -273,5 +273,5 @@ jobs:
             // A run that could not add anything it intended to is a failure —
             // silence here would look identical to "nothing to do".
             if (!dryRun && failed > 0 && added === 0) {
-              core.setFailed(`All ${failed} additions failed. Check PROJECT_TOKEN permissions.`);
+              core.setFailed(`All ${failed} additions failed. Check the App's organization_projects permission and that it is installed on all repos.`);
             }
