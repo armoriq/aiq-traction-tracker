@@ -1,0 +1,219 @@
+# Adds open issues from every repo in the org to the org project board.
+#
+# Replaces the Projects built-in "Auto add" workflows, which are capped at
+# roughly ten per project — far short of the repo count here. Action-based
+# adding has no such cap.
+#
+# This RECONCILES rather than reacting to events: each run compares the org's
+# open issues against what the project already contains and adds the
+# difference. A missed or delayed schedule window therefore cannot drop an
+# issue, and re-running is always safe.
+#
+# Requires a PROJECT_TOKEN secret with:
+#   - project: read+write   (org projects are not reachable with GITHUB_TOKEN)
+#   - issues: read / repo   (to see issues across all repos)
+# A GitHub App installation token is preferable to a personal token, which
+# breaks silently when its owner rotates it or leaves.
+name: Issues to project
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub may delay scheduled runs under load; the
+    # reconciling design above makes that harmless.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be added without adding it"
+        type: boolean
+        default: true
+      max_adds:
+        description: "Safety cap on additions in one run"
+        type: string
+        default: "50"
+      created_after:
+        description: "Only issues created on/after this date (YYYY-MM-DD). Blank = all open issues, which backfills the existing backlog."
+        type: string
+        default: ""
+
+# Two runs adding the same issue would race; keep one at a time.
+concurrency:
+  group: issues-to-project
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    name: Sync issues to project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token is present
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [ -z "${PROJECT_TOKEN:-}" ]; then
+            echo "::error::PROJECT_TOKEN secret is not set. Org projects cannot be written with GITHUB_TOKEN."
+            exit 1
+          fi
+
+      - name: Sync
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          ORG: ${{ github.repository_owner }}
+          PROJECT_NUMBER: "1"
+          STATUS_OPTION: Backlog
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          MAX_ADDS: ${{ inputs.max_adds || '50' }}
+          CREATED_AFTER: ${{ inputs.created_after || '' }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const org = process.env.ORG;
+            const projectNumber = Number(process.env.PROJECT_NUMBER);
+            const statusOption = process.env.STATUS_OPTION;
+            const dryRun = process.env.DRY_RUN === 'true';
+            const maxAdds = Number(process.env.MAX_ADDS) || 50;
+            const createdAfter = (process.env.CREATED_AFTER || '').trim();
+
+            // --- 1. Resolve the project and its Status field at runtime -------
+            // Node IDs are discovered rather than hardcoded. The previous
+            // per-repo workflow embedded literal IDs, which silently stop
+            // matching if a field or option is recreated.
+            const meta = await github.graphql(`
+              query($org:String!, $num:Int!) {
+                organization(login:$org) {
+                  projectV2(number:$num) {
+                    id
+                    title
+                    field(name:"Status") {
+                      ... on ProjectV2SingleSelectField { id name options { id name } }
+                    }
+                  }
+                }
+              }`, { org, num: projectNumber });
+
+            const project = meta.organization?.projectV2;
+            if (!project) {
+              core.setFailed(`Project #${projectNumber} not found in ${org}, or the token cannot read it.`);
+              return;
+            }
+            core.info(`Project: ${project.title} (#${projectNumber})`);
+
+            const statusField = project.field;
+            const option = statusField?.options?.find(o => o.name === statusOption);
+            if (statusField && !option) {
+              core.warning(`Status field has no option named "${statusOption}" — issues will be added without a status. Options: ${statusField.options.map(o => o.name).join(', ')}`);
+            }
+
+            // --- 2. What is already in the project? ---------------------------
+            const inProject = new Set();
+            let cursor = null;
+            for (;;) {
+              const page = await github.graphql(`
+                query($id:ID!, $after:String) {
+                  node(id:$id) {
+                    ... on ProjectV2 {
+                      items(first:100, after:$after) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes { content { ... on Issue { id } ... on PullRequest { id } } }
+                      }
+                    }
+                  }
+                }`, { id: project.id, after: cursor });
+              const items = page.node.items;
+              for (const n of items.nodes) if (n.content?.id) inProject.add(n.content.id);
+              if (!items.pageInfo.hasNextPage) break;
+              cursor = items.pageInfo.endCursor;
+            }
+            core.info(`Project already contains ${inProject.size} items.`);
+
+            // --- 3. Every open issue in the org -------------------------------
+            // Note: code search caps at 1000 results per query. If the org ever
+            // exceeds that, this needs splitting by repo or by date range —
+            // the run logs the count so the ceiling is visible before it bites.
+            let q = `org:${org} is:issue is:open`;
+            if (createdAfter) q += ` created:>=${createdAfter}`;
+
+            const issues = [];
+            cursor = null;
+            for (;;) {
+              const page = await github.graphql(`
+                query($q:String!, $after:String) {
+                  search(query:$q, type:ISSUE, first:100, after:$after) {
+                    issueCount
+                    pageInfo { hasNextPage endCursor }
+                    nodes { ... on Issue { id number title createdAt repository { name } } }
+                  }
+                }`, { q, after: cursor });
+              if (cursor === null) core.info(`Search reports ${page.search.issueCount} open issues.`);
+              issues.push(...page.search.nodes.filter(n => n && n.id));
+              if (!page.search.pageInfo.hasNextPage) break;
+              cursor = page.search.pageInfo.endCursor;
+            }
+            core.info(`Retrieved ${issues.length} open issues.`);
+            if (issues.length === 0) {
+              core.info('No open issues found — nothing to reconcile.');
+              return;
+            }
+
+            // --- 4. Add the difference ----------------------------------------
+            const missing = issues.filter(i => !inProject.has(i.id));
+            core.info(`${missing.length} open issues are not in the project.`);
+
+            const summary = [
+              `### Issues to project`,
+              ``,
+              `| | |`,
+              `|---|---:|`,
+              `| Open issues found | ${issues.length} |`,
+              `| Already in project | ${issues.length - missing.length} |`,
+              `| Missing | **${missing.length}** |`,
+              `| Cap this run | ${maxAdds} |`,
+              `| Mode | ${dryRun ? 'DRY RUN' : 'live'} |`,
+              ``,
+            ];
+
+            const batch = missing.slice(0, maxAdds);
+            if (missing.length > maxAdds) {
+              summary.push(`Capped at ${maxAdds}; the remaining ${missing.length - maxAdds} will be picked up next run.`, ``);
+            }
+
+            let added = 0, failed = 0;
+            for (const issue of batch) {
+              const label = `${issue.repository.name}#${issue.number}`;
+              if (dryRun) { core.info(`would add ${label} — ${issue.title}`); continue; }
+              try {
+                const res = await github.graphql(`
+                  mutation($project:ID!, $content:ID!) {
+                    addProjectV2ItemById(input:{ projectId:$project, contentId:$content }) {
+                      item { id }
+                    }
+                  }`, { project: project.id, content: issue.id });
+
+                const itemId = res.addProjectV2ItemById.item.id;
+                if (statusField && option) {
+                  await github.graphql(`
+                    mutation($project:ID!, $item:ID!, $field:ID!, $opt:String!) {
+                      updateProjectV2ItemFieldValue(input:{
+                        projectId:$project, itemId:$item, fieldId:$field,
+                        value:{ singleSelectOptionId:$opt }
+                      }) { projectV2Item { id } }
+                    }`, { project: project.id, item: itemId, field: statusField.id, opt: option.id });
+                }
+                added++;
+                core.info(`added ${label}`);
+              } catch (err) {
+                failed++;
+                core.warning(`failed to add ${label}: ${err.message}`);
+              }
+            }
+
+            if (!dryRun) summary.push(`Added **${added}**${failed ? `, ${failed} failed` : ''}.`, ``);
+            await core.summary.addRaw(summary.join('\n')).write();
+
+            // A run that could not add anything it intended to is a failure —
+            // silence here would look identical to "nothing to do".
+            if (!dryRun && failed > 0 && added === 0) {
+              core.setFailed(`All ${failed} additions failed. Check PROJECT_TOKEN permissions.`);
+            }
