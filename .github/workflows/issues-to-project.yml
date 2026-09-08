@@ -89,7 +89,14 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           ORG: ${{ github.repository_owner }}
-          PROJECT_NUMBER: "1"
+          # https://github.com/orgs/armoriq/projects/4 — the aggregation board.
+          # Deliberately NOT project 1, which is an existing hand-curated board
+          # this job must never write to.
+          PROJECT_NUMBER: "4"
+          # A fresh board template ships Status = Todo / In Progress / Done, so
+          # "Backlog" may not exist on this board. A missing option warns and
+          # lists the real ones rather than failing, so a dry run tells you
+          # what belongs here.
           STATUS_OPTION: Backlog
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           MAX_ADDS: ${{ inputs.max_adds || '50' }}
