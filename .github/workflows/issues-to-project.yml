@@ -1,0 +1,284 @@
+# Adds open issues from every repo in the org to the org project board.
+#
+# Replaces the Projects built-in "Auto add" workflows, which are capped at
+# roughly ten per project — far short of the repo count here. Action-based
+# adding has no such cap.
+#
+# This RECONCILES rather than reacting to events: each run compares the org's
+# open issues against what the project already contains and adds the
+# difference. A missed or delayed schedule window therefore cannot drop an
+# issue, and re-running is always safe.
+#
+# Reconciliation cuts both ways: removing an open issue from the board is
+# futile — the next run adds it straight back. The supported opt-out is the
+# `no-board` label, which the search below excludes.
+#
+# NOTE: GitHub auto-disables cron schedules in public repos after 60 days
+# without repo activity, and this repo changes rarely. If the board stops
+# filling, check the Actions tab for a "workflow disabled" banner first.
+#
+# Requires the armoriq-project-sync GitHub App (app id 4877216, installed
+# org-wide) and its private key stored as the APP_PRIVATE_KEY secret.
+# The App grants exactly:
+#   - organization_projects: write  (GITHUB_TOKEN cannot write org projects)
+#   - issues: read, metadata: read  (across all repos)
+# The App is installed on ALL repositories: any repo the token cannot read is
+# silently absent from the search rather than reported as an error.
+name: Issues to project
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub may delay scheduled runs under load; the
+    # reconciling design above makes that harmless.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be added without adding it"
+        type: boolean
+        default: true
+      max_adds:
+        description: "Safety cap on additions in one run"
+        type: string
+        default: "50"
+      created_after:
+        description: "Only issues created on/after this date (YYYY-MM-DD). Blank = all open issues, which backfills the existing backlog."
+        type: string
+        default: ""
+
+# Two runs adding the same issue would race; keep one at a time.
+concurrency:
+  group: issues-to-project
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    name: Sync issues to project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the private key is present
+        env:
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${APP_PRIVATE_KEY:-}" ]; then
+            echo "::error::APP_PRIVATE_KEY secret is not set. Store the armoriq-project-sync .pem with: gh secret set APP_PRIVATE_KEY --repo armoriq/.github < key.pem"
+            exit 1
+          fi
+
+      # Exchange the App's id + private key for an installation token, scoped
+      # to the armoriq-project-sync installation. The token lasts one hour and
+      # is minted fresh each run, so there is no long-lived credential in CI —
+      # only the private key, which is not itself an access token.
+      #
+      # An App is used rather than a personal token because a PAT is tied to
+      # one person: it dies when they rotate it, leave, or when it expires,
+      # and it carries that person's whole access rather than just what this
+      # job needs (issues:read + organization_projects:write).
+      - name: Mint an App installation token
+        id: app-token
+        uses: actions/create-github-app-token@21cfef2b496dd8ef5b904c159339626a10ad380e # v1.11.0
+        with:
+          # App id is public information, not a secret.
+          app-id: "4877216"
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Sync
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          ORG: ${{ github.repository_owner }}
+          # https://github.com/orgs/armoriq/projects/4 — the aggregation board.
+          # Deliberately NOT project 1, which is an existing hand-curated board
+          # this job must never write to.
+          PROJECT_NUMBER: "4"
+          # A fresh board template ships Status = Todo / In Progress / Done, so
+          # "Backlog" may not exist on this board. A missing option warns and
+          # lists the real ones rather than failing, so a dry run tells you
+          # what belongs here.
+          STATUS_OPTION: Backlog
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          MAX_ADDS: ${{ inputs.max_adds || '50' }}
+          CREATED_AFTER: ${{ inputs.created_after || '' }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const org = process.env.ORG;
+            const projectNumber = Number(process.env.PROJECT_NUMBER);
+            const statusOption = process.env.STATUS_OPTION;
+            const dryRun = process.env.DRY_RUN === 'true';
+            // 0 is a valid cap (inventory-only run); only unparseable or
+            // negative input falls back to the default.
+            const maxAddsRaw = Number(process.env.MAX_ADDS);
+            const maxAdds = Number.isFinite(maxAddsRaw) && maxAddsRaw >= 0 ? maxAddsRaw : 50;
+            const createdAfter = (process.env.CREATED_AFTER || '').trim();
+
+            // --- 1. Resolve the project and its Status field at runtime -------
+            // Node IDs are discovered rather than hardcoded. The previous
+            // per-repo workflow embedded literal IDs, which silently stop
+            // matching if a field or option is recreated.
+            const meta = await github.graphql(`
+              query($org:String!, $num:Int!) {
+                organization(login:$org) {
+                  projectV2(number:$num) {
+                    id
+                    title
+                    field(name:"Status") {
+                      ... on ProjectV2SingleSelectField { id name options { id name } }
+                    }
+                  }
+                }
+              }`, { org, num: projectNumber });
+
+            const project = meta.organization?.projectV2;
+            if (!project) {
+              core.setFailed(`Project #${projectNumber} not found in ${org}, or the token cannot read it.`);
+              return;
+            }
+            core.info(`Project: ${project.title} (#${projectNumber})`);
+
+            const statusField = project.field;
+            const option = statusField?.options?.find(o => o.name === statusOption);
+            if (statusField && !option) {
+              core.warning(`Status field has no option named "${statusOption}" — issues will be added without a status. Options: ${statusField.options.map(o => o.name).join(', ')}`);
+            }
+
+            // --- 2. What is already in the project? ---------------------------
+            const inProject = new Set();
+            let cursor = null;
+            for (;;) {
+              const page = await github.graphql(`
+                query($id:ID!, $after:String) {
+                  node(id:$id) {
+                    ... on ProjectV2 {
+                      items(first:100, after:$after) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes { content { ... on Issue { id } ... on PullRequest { id } } }
+                      }
+                    }
+                  }
+                }`, { id: project.id, after: cursor });
+              const items = page.node.items;
+              for (const n of items.nodes) if (n.content?.id) inProject.add(n.content.id);
+              if (!items.pageInfo.hasNextPage) break;
+              cursor = items.pageInfo.endCursor;
+            }
+            core.info(`Project already contains ${inProject.size} items.`);
+
+            // --- 3. Every open issue in the org -------------------------------
+            // Note: search caps at 1000 retrievable results per query. If the
+            // org ever exceeds that, this needs splitting by repo or by date
+            // range — the run warns above 900 and goes red above 1000, so the
+            // ceiling is loud before (and when) it bites.
+            //
+            // `archived:false` keeps archived repos' issues off the board;
+            // `-label:no-board` is the human opt-out, without which
+            // reconciliation would re-add anything a maintainer removes.
+            let q = `org:${org} is:issue is:open archived:false -label:no-board`;
+            if (createdAfter) q += ` created:>=${createdAfter}`;
+
+            const issues = [];
+            cursor = null;
+            for (;;) {
+              const page = await github.graphql(`
+                query($q:String!, $after:String) {
+                  search(query:$q, type:ISSUE, first:100, after:$after) {
+                    issueCount
+                    pageInfo { hasNextPage endCursor }
+                    nodes { ... on Issue { id number title createdAt repository { name } } }
+                  }
+                }`, { q, after: cursor });
+              if (cursor === null) {
+                const count = page.search.issueCount;
+                core.info(`Search reports ${count} open issues.`);
+                if (count > 1000) {
+                  core.setFailed(`${count} issues match but search returns at most 1000 — the rest are invisible to this sync. Split the query by date or repo.`);
+                } else if (count > 900) {
+                  core.warning(`Approaching the 1000-result search ceiling (${count}/1000).`);
+                }
+              }
+              issues.push(...page.search.nodes.filter(n => n && n.id));
+              if (!page.search.pageInfo.hasNextPage) break;
+              cursor = page.search.pageInfo.endCursor;
+            }
+            core.info(`Retrieved ${issues.length} open issues.`);
+            if (issues.length === 0) {
+              core.info('No open issues found — nothing to reconcile.');
+              return;
+            }
+
+            // --- 4. Add the difference ----------------------------------------
+            const missing = issues.filter(i => !inProject.has(i.id));
+            core.info(`${missing.length} open issues are not in the project.`);
+
+            const summary = [
+              `### Issues to project`,
+              ``,
+              `| | |`,
+              `|---|---:|`,
+              `| Open issues found | ${issues.length} |`,
+              `| Already in project | ${issues.length - missing.length} |`,
+              `| Missing | **${missing.length}** |`,
+              `| Cap this run | ${maxAdds} |`,
+              `| Mode | ${dryRun ? 'DRY RUN' : 'live'} |`,
+              ``,
+            ];
+
+            const batch = missing.slice(0, maxAdds);
+            if (missing.length > maxAdds) {
+              summary.push(`Capped at ${maxAdds}; the remaining ${missing.length - maxAdds} will be picked up next run.`, ``);
+            }
+
+            let added = 0, failed = 0;
+            for (const issue of batch) {
+              const label = `${issue.repository.name}#${issue.number}`;
+              if (dryRun) { core.info(`would add ${label} — ${issue.title}`); continue; }
+              try {
+                // addProjectV2ItemById is idempotent: for an item already on
+                // the board (e.g. archived, so absent from the items query) it
+                // returns the EXISTING item. Fetch its current Status in the
+                // same round trip and only set Backlog when it has none, so a
+                // re-add can never stomp a curated status.
+                const res = await github.graphql(`
+                  mutation($project:ID!, $content:ID!) {
+                    addProjectV2ItemById(input:{ projectId:$project, contentId:$content }) {
+                      item {
+                        id
+                        fieldValueByName(name:"Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { optionId }
+                        }
+                      }
+                    }
+                  }`, { project: project.id, content: issue.id });
+
+                const item = res.addProjectV2ItemById.item;
+                if (statusField && option && !item.fieldValueByName?.optionId) {
+                  await github.graphql(`
+                    mutation($project:ID!, $item:ID!, $field:ID!, $opt:String!) {
+                      updateProjectV2ItemFieldValue(input:{
+                        projectId:$project, itemId:$item, fieldId:$field,
+                        value:{ singleSelectOptionId:$opt }
+                      }) { projectV2Item { id } }
+                    }`, { project: project.id, item: item.id, field: statusField.id, opt: option.id });
+                }
+                added++;
+                core.info(`added ${label}`);
+              } catch (err) {
+                failed++;
+                core.warning(`failed to add ${label}: ${err.message}`);
+              }
+              // Pace the mutations: back-to-back writes are what GitHub's
+              // secondary rate limits throttle, and a throttled backfill turns
+              // into a wall of warnings across several runs.
+              await new Promise(r => setTimeout(r, 500));
+            }
+
+            if (!dryRun) summary.push(`Added **${added}**${failed ? `, ${failed} failed` : ''}.`, ``);
+            await core.summary.addRaw(summary.join('\n')).write();
+
+            // A run that could not add anything it intended to is a failure —
+            // silence here would look identical to "nothing to do".
+            if (!dryRun && failed > 0 && added === 0) {
+              core.setFailed(`All ${failed} additions failed. Check the App's organization_projects permission and that it is installed on all repos.`);
+            }
