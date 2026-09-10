@@ -1,0 +1,80 @@
+name: Reusable gitleaks
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: false
+        type: string
+        default: ""
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select introduced commits
+        id: commits
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          OUT=.git/gitleaks-commits.txt
+          if [ -n "${BASE_REF:-}" ]; then
+            git fetch --no-tags --depth=50 origin "${BASE_REF}" || true
+            git rev-list --right-only --cherry-pick "FETCH_HEAD...HEAD" > "${OUT}" || git rev-list -1 HEAD > "${OUT}"
+          else
+            git rev-list -1 HEAD > "${OUT}"
+          fi
+          echo "count=$(wc -l < "${OUT}")" >> "${GITHUB_OUTPUT}"
+      - name: Scan with default config
+        id: scan_default
+        if: inputs.config-path == ''
+        continue-on-error: true
+        uses: docker://zricethezav/gitleaks:v7.4.0@sha256:ffe35a0d42974c19da37b3fb5ca1ff1e781ae6dffaf80164568129a2714eca61
+        with:
+          args: >-
+            --path=/github/workspace
+            --verbose
+            --redact
+            --commits-file=/github/workspace/.git/gitleaks-commits.txt
+      - name: Scan with custom config
+        id: scan_custom
+        if: inputs.config-path != ''
+        continue-on-error: true
+        uses: docker://zricethezav/gitleaks:v7.4.0@sha256:ffe35a0d42974c19da37b3fb5ca1ff1e781ae6dffaf80164568129a2714eca61
+        with:
+          args: >-
+            --path=/github/workspace
+            --verbose
+            --redact
+            --commits-file=/github/workspace/.git/gitleaks-commits.txt
+            --config-path=/github/workspace/${{ inputs.config-path }}
+      - name: Publish summary
+        if: always()
+        shell: bash
+        env:
+          DEFAULT_OUTCOME: ${{ steps.scan_default.outcome }}
+          CUSTOM_OUTCOME: ${{ steps.scan_custom.outcome }}
+          SCAN_COUNT: ${{ steps.commits.outputs.count }}
+        run: |
+          set -euo pipefail
+          OUTCOME="${DEFAULT_OUTCOME}"
+          if [ "${OUTCOME}" = "skipped" ]; then
+            OUTCOME="${CUSTOM_OUTCOME}"
+          fi
+          {
+            echo "Gitleaks (advisory)"
+            echo "--------------------"
+            echo "Scanned ${SCAN_COUNT} introduced commit(s)."
+            echo ""
+            if [ "${OUTCOME}" = "success" ]; then
+              echo "No secrets detected."
+            else
+              echo "Possible secrets detected. This check is advisory and does not block. See the scan step log."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit 0
