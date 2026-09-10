@@ -1,0 +1,57 @@
+name: Reusable regression gate
+on:
+  workflow_call:
+    inputs:
+      bug-labels:
+        required: false
+        type: string
+        default: "bug"
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check for regression test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BUG_LABELS: ${{ inputs.bug-labels }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          say() {
+            {
+              echo "Regression gate (advisory)"
+              echo "--------------------------"
+              echo ""
+              echo "$1"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
+          if [ -z "${PR_NUMBER:-}" ]; then
+            say "Not a pull request event. Skipping."
+            exit 0
+          fi
+          IS_BUG="no"
+          OLD_IFS="${IFS}"
+          IFS=","
+          for want in ${BUG_LABELS}; do
+            case ",${PR_LABELS}," in
+              *",${want},"*) IS_BUG="yes" ;;
+            esac
+          done
+          IFS="${OLD_IFS}"
+          if [ "${IS_BUG}" = "no" ]; then
+            say "No bug label on this PR. Skipping."
+            exit 0
+          fi
+          FILES="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
+          if echo "${FILES}" | grep -iE '(^|/)(test|tests|__tests__|spec)(s|/|_|-|\.)' > /dev/null; then
+            say "A test file changed with this bug fix. Good."
+            exit 0
+          fi
+          say "Bug-labeled PR with no test file changed. This check is advisory and does not block. Please add a test that fails without the fix and passes with it."
+          exit 0
